@@ -1,7 +1,6 @@
-import os
+import hashlib
 import sqlite3
 from pathlib import Path
-from typing import Optional
 
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "app.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -11,6 +10,10 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def init_db() -> None:
@@ -67,7 +70,7 @@ def seed_demo_user() -> None:
     if not user:
         conn.execute(
             "INSERT INTO users (email, password_hash, full_name, role) VALUES (?, ?, ?, ?)",
-            ("demo@support.ai", "demo123", "Demo User", "manager"),
+            ("demo@support.ai", hash_password("demo123"), "Demo User", "manager"),
         )
         conn.commit()
     conn.close()
