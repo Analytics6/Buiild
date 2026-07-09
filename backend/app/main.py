@@ -1,18 +1,21 @@
 import json
 import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_core.documents import Document
 
-app = FastAPI(title="Complaint RAG API")
+from .auth import authenticate_user, create_session, validate_session
+from .database import get_connection, init_db, seed_demo_user
+
+app = FastAPI(title="Production Complaint RAG")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,23 +26,25 @@ app.add_middleware(
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "complaints"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+init_db()
+seed_demo_user()
 
 PROMPT_TEMPLATES = {
     "support": PromptTemplate.from_template(
-        "You are a customer support assistant. Use the retrieved complaint records to answer the user's question.\nQuestion: {question}\nContext:\n{context}\nAnswer in a concise and empathetic tone."
+        "You are a customer support specialist. Use the retrieved complaint records to answer the user's question.\nQuestion: {question}\nContext:\n{context}\nAnswer clearly, empathetically, and with a concise action plan."
     ),
     "manager": PromptTemplate.from_template(
-        "You are a support operations manager. Summarize the likely resolution strategy for the complaint and highlight the operational takeaway.\nQuestion: {question}\nContext:\n{context}\nProvide a short executive summary."
+        "You are a support operations manager. Summarize the most likely resolution strategy and highlight the operational takeaway.\nQuestion: {question}\nContext:\n{context}\nProvide a concise executive summary."
     ),
     "analyst": PromptTemplate.from_template(
-        "You are a complaint analysis specialist. Compare the retrieved complaints and explain the recurring resolution pattern.\nQuestion: {question}\nContext:\n{context}\nGive a concise analytical summary."
+        "You are a complaint analysis specialist. Compare the retrieved complaints and explain recurring patterns.\nQuestion: {question}\nContext:\n{context}\nGive a short analytical summary."
     ),
 }
 
 
 def build_demo_dataset(count: int = 200) -> List[Dict[str, Any]]:
     topics = [
-        ("billing", "billing issue", "refund", "The customer was overcharged and received a refund after a review of the invoice history."),
+        ("billing", "billing issue", "refund", "The customer was overcharged and received a refund after a detailed audit of the invoice history."),
         ("delivery", "delivery delay", "replacement", "The shipment was resent at no extra cost and the customer received proactive tracking updates."),
         ("product", "defective product", "replacement", "The product was replaced under warranty and the customer was offered a prepaid return label."),
         ("subscription", "subscription cancellation", "credit", "The account was canceled and a service credit was applied for the inconvenience caused by the billing confusion."),
@@ -51,7 +56,7 @@ def build_demo_dataset(count: int = 200) -> List[Dict[str, Any]]:
         topic, complaint_seed, solution_seed, solution_text = topics[i % len(topics)]
         complaint = (
             f"A customer contacted support about a {complaint_seed} involving the {topic} experience. "
-            f"They explained that the problem had already caused frustration because it affected their account, order, or service expectations. "
+            f"They explained that the issue had already caused significant frustration because it affected their account, order, or service expectations. "
             f"The customer described repeated attempts to resolve the issue, uncertainty about the next step, and a strong expectation that the company would provide a clear explanation and a fair remedy."
         )
         solution = (
@@ -90,9 +95,78 @@ def load_documents() -> List[Document]:
     return docs
 
 
+def require_user(authorization: Optional[str]) -> dict:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.replace("Bearer ", "", 1)
+    user = validate_session(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    return user
+
+
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/login")
+def login(payload: Dict[str, str]) -> Dict[str, Any]:
+    email = payload.get("email", "")
+    password = payload.get("password", "")
+    user = authenticate_user(email, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_session(user["id"])
+    return {"token": token, "user": {"email": user["email"], "full_name": user["full_name"], "role": user["role"]}}
+
+
+@app.get("/me")
+def me(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    user = require_user(authorization)
+    return {"user": {"email": user["email"], "full_name": user["full_name"], "role": user["role"]}}
+
+
+@app.get("/chats")
+def chats(authorization: Optional[str] = Header(default=None)) -> List[Dict[str, Any]]:
+    user = require_user(authorization)
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM chats WHERE user_id = ? ORDER BY id DESC", (user["id"],)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+@app.post("/chat")
+def create_chat(payload: Dict[str, Any], authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    user = require_user(authorization)
+    title = payload.get("title", "New conversation")
+    conn = get_connection()
+    cursor = conn.execute("INSERT INTO chats (user_id, title) VALUES (?, ?)", (user["id"], title))
+    conn.commit()
+    chat_id = cursor.lastrowid
+    conn.close()
+    return {"id": chat_id, "title": title}
+
+
+@app.get("/chat/{chat_id}/messages")
+def get_messages(chat_id: int, authorization: Optional[str] = Header(default=None)) -> List[Dict[str, Any]]:
+    require_user(authorization)
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM messages WHERE chat_id = ? ORDER BY id ASC", (chat_id,)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+@app.post("/chat/{chat_id}/message")
+def save_message(chat_id: int, payload: Dict[str, str], authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    require_user(authorization)
+    role = payload.get("role", "assistant")
+    content = payload.get("content", "")
+    conn = get_connection()
+    conn.execute("INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)", (chat_id, role, content))
+    conn.commit()
+    conn.close()
+    return {"status": "saved"}
 
 
 @app.get("/templates")
@@ -101,7 +175,10 @@ def list_templates() -> Dict[str, List[str]]:
 
 
 @app.post("/ask")
-def ask(question: str, template: str = "support") -> Dict[str, Any]:
+def ask(payload: Dict[str, Any], authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    require_user(authorization)
+    question = payload.get("question", "")
+    template = payload.get("template", "support")
     if template not in PROMPT_TEMPLATES:
         raise HTTPException(status_code=400, detail="Invalid template")
 
@@ -131,7 +208,8 @@ def ask(question: str, template: str = "support") -> Dict[str, Any]:
 
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...)) -> Dict[str, Any]:
+async def upload(file: UploadFile = File(...), authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    require_user(authorization)
     content = await file.read()
     try:
         payload = json.loads(content.decode("utf-8"))

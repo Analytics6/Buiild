@@ -1,14 +1,7 @@
-import hashlib
 import secrets
 from typing import Optional
 
-from fastapi import HTTPException
-
-from .database import get_connection
-
-
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+from .database import get_connection, hash_password
 
 
 def verify_password(password: str, password_hash: str) -> bool:
