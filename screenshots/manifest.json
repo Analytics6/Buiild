@@ -1,0 +1,20 @@
+{
+  "captured": [
+    {"file": "01-login.png", "view": "Login (logged out)", "user": null},
+    {"file": "02-dashboard.png", "view": "Dashboard", "user": "demo@support.ai"},
+    {"file": "03-assistant-empty.png", "view": "AI Assistant (no active chat)", "user": "demo@support.ai"},
+    {"file": "04-assistant-new-review.png", "view": "AI Assistant (new conversation)", "user": "demo@support.ai"},
+    {"file": "05-reports.png", "view": "Operational Reports", "user": "demo@support.ai"},
+    {"file": "06-knowledge-base.png", "view": "Knowledge Base & Intake", "user": "demo@support.ai"},
+    {"file": "07-settings-demo.png", "view": "Settings (manager role)", "user": "demo@support.ai"},
+    {"file": "08-settings-admin.png", "view": "Settings (admin role)", "user": "admin@support.ai"},
+    {"file": "09-mobile-dashboard.png", "view": "Dashboard (mobile viewport 390x844)", "user": "demo@support.ai"}
+  ],
+  "skipped": [],
+  "not_captured": [
+    {"view": "Admin panel", "reason": "No separate admin route; role shown only in Settings"},
+    {"view": "Sidebar Operations items", "reason": "Static labels, not clickable views"},
+    {"view": "Chat with AI response", "reason": "Requires live OpenAI /ask API call"},
+    {"view": "Upload success state", "reason": "Requires uploading a JSON file during capture"}
+  ]
+}

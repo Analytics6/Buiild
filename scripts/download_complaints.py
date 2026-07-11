@@ -3,10 +3,22 @@ import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from src.complaint_rag import build_demo_dataset
+from src.complaint_dataset import write_complaint_files
 
 
 if __name__ == "__main__":
-    output_dir = Path(__file__).resolve().parents[1] / "data" / "complaints"
-    build_demo_dataset(output_dir, count=200)
-    print(f"Created complaint dataset in {output_dir}")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate detailed complaint JSON dataset")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "data" / "complaints",
+        help="Directory for complaint JSON files",
+    )
+    parser.add_argument("--count", type=int, default=200, help="Number of complaint files to create")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing complaint files")
+    args = parser.parse_args()
+
+    write_complaint_files(args.output_dir, count=args.count, force=True)
+    print(f"Created {args.count} complaint files in {args.output_dir}")

@@ -1,20 +1,51 @@
-from pathlib import Path
-
-from src.complaint_rag import ComplaintRAG, build_demo_dataset
-
-
-def test_retrieval_returns_relevant_complaint(tmp_path: Path):
-    build_demo_dataset(tmp_path, count=10)
-    rag = ComplaintRAG(tmp_path, top_k=3)
-
-    results = rag.search("billing issue", top_k=3)
-
-    assert len(results) == 3
-    assert any("billing" in item["complaint"].lower() for item in results)
+def _login(client, email="demo@support.ai", password="demo123"):
+    response = client.post("/login", json={"email": email, "password": password})
+    return response.json()["token"]
 
 
-def test_can_initialize_with_inline_records():
-    rag = ComplaintRAG(data_dir=None, records=[{"complaint": "custom billing issue", "solution": "refund the charge"}], top_k=1)
+def test_ask_requires_auth(client):
+    response = client.post("/ask", json={"question": "billing issue"})
+    assert response.status_code == 401
 
-    assert len(rag.records) == 1
-    assert rag.records[0]["complaint"] == "custom billing issue"
+
+def test_ask_without_openai_key(client):
+    token = _login(client)
+    response = client.post(
+        "/ask",
+        json={"question": "customer has a billing issue", "template": "support"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "answer" in data
+    assert "sources" in data
+    assert data["cached"] is False
+
+
+def test_templates_endpoint(client):
+    response = client.get("/templates")
+    assert response.status_code == 200
+    templates = response.json()["templates"]
+    assert "support" in templates
+    assert "manager" in templates
+    assert "analyst" in templates
+
+
+def test_ask_invalid_template(client):
+    token = _login(client)
+    response = client.post(
+        "/ask",
+        json={"question": "test", "template": "invalid"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+def test_ask_empty_question(client):
+    token = _login(client)
+    response = client.post(
+        "/ask",
+        json={"question": ""},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422

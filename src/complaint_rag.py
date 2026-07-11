@@ -126,29 +126,7 @@ class ComplaintRAG:
         return {"answer": answer, "sources": [m["source"] for m in matches]}
 
 
-def build_demo_dataset(output_dir: str | Path, count: int = 200) -> Path:
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+def build_demo_dataset(output_dir: str | Path, count: int = 200, force: bool = True) -> Path:
+    from src.complaint_dataset import write_complaint_files
 
-    topics = [
-        ("billing", "billing issue", "refund", "The customer was overcharged and received a refund."),
-        ("delivery", "delivery delay", "replacement", "The shipment was resent at no extra cost."),
-        ("product", "defective product", "replacement", "The product was replaced under warranty."),
-        ("subscription", "subscription cancellation", "credit", "The account was canceled and a service credit was applied."),
-        ("support", "slow support response", "priority", "The case was escalated to a priority support queue."),
-        ("refund", "refund request", "processing", "The refund was processed within five business days."),
-    ]
-
-    records = []
-    for i in range(count):
-        topic, complaint_seed, solution_seed, solution_text = topics[i % len(topics)]
-        complaint = f"Customer reported a {complaint_seed} related to {topic}."
-        solution = f"Support resolved it with {solution_seed} and documented the follow-up. {solution_text}"
-        records.append({"complaint": complaint, "solution": solution})
-
-    for idx, record in enumerate(records):
-        file_path = output_dir / f"complaint_{idx + 1:03d}.json"
-        with file_path.open("w", encoding="utf-8") as handle:
-            json.dump(record, handle, indent=2)
-
-    return output_dir
+    return write_complaint_files(output_dir, count=count, force=force)
